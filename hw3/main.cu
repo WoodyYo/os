@@ -31,7 +31,7 @@ __device__ __managed__ uchar input[STORAGE_SIZE];
 
 //page table
 extern __shared__ u32 pt[];
-extern __shared__ u32 latest_time[];
+__device__ __managed__ u32 latest_time[1024];
 
 __device__ __managed__ u32 cur_time;
 
@@ -68,8 +68,10 @@ __device__ u32 lru() {
 __device__ int find(u32 p) {
 	for(int i = 0; i < PAGE_ENTRIES; i++) {
 		u32 cur_p = (pt[i]>>15);
+		/*if(cur_time < 35) printf("i=%d, pt[]=%d\n", i, pt[i]);*/
 		if(cur_p == p) {
-			return i;
+			if(latest_time[i] == 0) return -1;
+			else return i;
 		}
 	}
 	return -1;
@@ -82,9 +84,9 @@ __device__ u32 paging(uchar *data, u32 p, u32 offset) {
 		u32 victim_index = lru();
 		u32 frame = pt[victim_index]&MASK;
 		u32 victim_p = (pt[victim_index] >> 15);
-		for(int i = 0; i < 4; i++) {
+		for(int i = 0; i < 32; i++) {
 			storage[victim_p+i] = data[frame+i];
-			data[frame+i] = storage[p];
+			data[frame+i] = storage[p+i];
 		}
 		pt[victim_index] = ((p<<15)|frame);
 		latest_time[victim_index] = cur_time;
@@ -97,8 +99,8 @@ __device__ u32 paging(uchar *data, u32 p, u32 offset) {
 }
 __device__ void init_pageTable(int pt_entries) {
 	cur_time = 0;
-	for(int i = 0; i < pt_entries; i++) {
-		pt[i] = ((4096<<15) | i*32);
+	for(int i = 0; i < PAGE_ENTRIES; i++) {
+		pt[i] = i*32;
 		latest_time[i] = 0;
 	}
 }
