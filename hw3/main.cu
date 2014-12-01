@@ -85,8 +85,8 @@ __device__ u32 paging(uchar *data, u32 p, u32 offset) {
 		u32 frame = pt[victim_index]&MASK;
 		u32 victim_p = (pt[victim_index] >> 15);
 		for(int i = 0; i < 32; i++) {
-			storage[victim_p+i] = data[frame+i];
-			data[frame+i] = storage[p+i];
+			storage[victim_p*32+i] = data[frame+i];
+			data[frame+i] = storage[p*32+i];
 		}
 		pt[victim_index] = ((p<<15)|frame);
 		latest_time[victim_index] = cur_time;
@@ -123,8 +123,9 @@ __device__ void Gwrite(uchar *data, u32 addr, uchar value) {
 }
 
 __device__ void snapshot(uchar *result, uchar *data, int offset, int input_size) {
-	for(int i = 0; i < input_size; i++)
+	for(int i = 0; i < input_size; i++) {
 		result[i] = Gread(data, i + offset);
+	}
 }
 
 __global__ void mykernel(int input_size) {
