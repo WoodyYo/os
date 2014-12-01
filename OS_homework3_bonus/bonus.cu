@@ -15,6 +15,11 @@
 #define TIME_MAX 4294967295
 #define MEMORY_SEGMENT 32768
 
+#define __LOCK(); for(int j = 0; j < 4; j++) {if(threadIdx.x == j) {
+#define __UNLOCK(); }__syncthreads(); }
+#define __GET_BASE() j*MEMORY_SEGMENT
+//C's macro is soooo bloody ugly comparing to ruby & lisp...
+
 typedef unsigned char uchar;
 typedef uint32_t u32;
 
@@ -137,15 +142,25 @@ __global__ void mykernel(int input_size) {
 	__shared__ uchar data[PHYSICAL_MEM_SIZE];
 	//get page table entries
 	int pt_entries = PHYSICAL_MEM_SIZE/PAGESIZE;
+
+	printf("my id = %d\n", threadIdx.x);
 	//B4 1st Gwrite or Gread
-	init_pageTable(pt_entries);
+	if(threadIdx.x == 0) init_pageTable(pt_entries);
 
 	//####Gwrite/Gread code section start####
-	for(int i = 0; i < input_size; i++) Gwrite(data, i, input[i]);
-	for(int i = input_size-1; i >= input_size-10; i--) int value = Gread(data, i);
+	__LOCK();
+	for(int i = 0; i < input_size; i++) Gwrite(data, i+__GET_BASE(), input[i]);
+	__UNLOCK();
+	for(int i = input_size-1; i >= input_size-10; i--) {
+		__LOCK();
+		int value = Gread(data, i+__GET_BASE());
+		__UNLOCK();
+	}
 
 	//the last line of Gwrite/Gread code section should be snapshot()
-	snapshot(result, data, 0, input_size);
+	__LOCK();
+	snapshot(result+__GET_BASE(), data, __GET_BASE(), input_size);
+	__UNLOCK();
 	//####Gwrite/Gread code section end####
 }
 
@@ -153,7 +168,7 @@ int main() {
 	int input_size = load_binaryFile(DATAFILE, input, STORAGE_SIZE);
 
 	cudaSetDevice(3);
-	mykernel<<<1, 1, 16384>>>(input_size);
+	mykernel<<<1, 4, 16384>>>(input_size/4);
 	cudaDeviceSynchronize();
 	cudaDeviceReset();
 

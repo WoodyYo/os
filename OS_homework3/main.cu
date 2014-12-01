@@ -15,10 +15,6 @@
 #define TIME_MAX 4294967295
 #define MEMORY_SEGMENT 32768
 
-#define __LOCK(); for(int j = 0; j < 4; j++) { if(threadIdx.x = j) {
-#define __UNLOCK(); }__syncthreads(); }
-#define __GET_BASE() j*MEMORY_SEGMENT
-
 typedef unsigned char uchar;
 typedef uint32_t u32;
 
@@ -36,7 +32,6 @@ __device__ __managed__ uchar input[STORAGE_SIZE];
 
 //page table
 extern __shared__ u32 pt[];
-__device__ __managed__ u32 latest_time[1024];
 
 __device__ __managed__ u32 cur_time;
 
@@ -57,13 +52,17 @@ void write_binaryFIle(const char *filename, uchar *a, int size) {
 }
 
 __device__ u32 lru() {
+	/****
+	  實作queue來解決lru並無法解決效能瓶頸，因為最大的問題卡在find的O(n)
+	  要改善find的效能，應實作binary search tree，but...
+	 ***/
 	u32 min = TIME_MAX;
 	int victim_index = 0;
 	for(int i = 0; i < PAGE_ENTRIES; i++) {
-		if(latest_time[i] == 0) return i;
+		if(pt[PAGE_ENTRIES+i] == 0) return i;
 		else {
-			if(latest_time[i] < min) {
-				min = latest_time[i];
+			if(pt[PAGE_ENTRIES+i] < min) {
+				min = pt[PAGE_ENTRIES+i];
 				victim_index = i;
 			}
 		}
@@ -75,7 +74,7 @@ __device__ int find(u32 p) {
 		u32 cur_p = (pt[i]>>15);
 		/*if(cur_time < 35) printf("i=%d, pt[]=%d\n", i, pt[i]);*/
 		if(cur_p == p) {
-			if(latest_time[i] == 0) return -1;
+			if(pt[PAGE_ENTRIES+i] == 0) return -1;
 			else return i;
 		}
 	}
@@ -94,11 +93,11 @@ __device__ u32 paging(uchar *data, u32 p, u32 offset) {
 			data[frame+i] = storage[p*32+i];
 		}
 		pt[victim_index] = ((p<<15)|frame);
-		latest_time[victim_index] = cur_time;
+		pt[PAGE_ENTRIES+victim_index] = cur_time;
 		return frame + offset;
 	}
 	else {
-		latest_time[p_index] = cur_time;
+		pt[PAGE_ENTRIES+p_index] = cur_time;
 		return (pt[p_index]&MASK) + offset;
 	}
 }
@@ -106,7 +105,7 @@ __device__ void init_pageTable(int pt_entries) {
 	cur_time = 0;
 	for(int i = 0; i < PAGE_ENTRIES; i++) {
 		pt[i] = i*32;
-		latest_time[i] = 0;
+		pt[PAGE_ENTRIES+i] = 0;
 	}
 }
 /*********************/
@@ -153,7 +152,7 @@ int main() {
 	int input_size = load_binaryFile(DATAFILE, input, STORAGE_SIZE);
 
 	cudaSetDevice(3);
-	mykernel<<<1, 4, 16384>>>(input_size/4);
+	mykernel<<<1, 1, 16384>>>(input_size);
 	cudaDeviceSynchronize();
 	cudaDeviceReset();
 
