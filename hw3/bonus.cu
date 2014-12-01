@@ -2,11 +2,10 @@
 #include <stdlib.h>
 #include <inttypes.h>
 
-//
 #define PAGESIZE 32
-//
+
 #define PHYSICAL_MEM_SIZE 32768
-//
+
 #define STORAGE_SIZE 131072
 
 #define DATAFILE "./data.bin"
@@ -14,6 +13,12 @@
 
 #define MASK 32767
 #define TIME_MAX 4294967295
+#define MEMORY_SEGMENT 32768
+
+#define __LOCK(); for(int j = 0; j < 4; j++) { if(threadIdx.x = j) {
+#define __UNLOCK(); }__syncthreads(); }
+#define __GET_BASE() j*MEMORY_SEGMENT
+
 typedef unsigned char uchar;
 typedef uint32_t u32;
 
@@ -31,7 +36,7 @@ __device__ __managed__ uchar input[STORAGE_SIZE];
 
 //page table
 extern __shared__ u32 pt[];
-extern __shared__ u32 latest_time[];
+__device__ __managed__ u32 latest_time[1024];
 
 __device__ __managed__ u32 cur_time;
 
@@ -68,8 +73,10 @@ __device__ u32 lru() {
 __device__ int find(u32 p) {
 	for(int i = 0; i < PAGE_ENTRIES; i++) {
 		u32 cur_p = (pt[i]>>15);
+		/*if(cur_time < 35) printf("i=%d, pt[]=%d\n", i, pt[i]);*/
 		if(cur_p == p) {
-			return i;
+			if(latest_time[i] == 0) return -1;
+			else return i;
 		}
 	}
 	return -1;
@@ -82,11 +89,11 @@ __device__ u32 paging(uchar *data, u32 p, u32 offset) {
 		u32 victim_index = lru();
 		u32 frame = pt[victim_index]&MASK;
 		u32 victim_p = (pt[victim_index] >> 15);
-		for(int i = 0; i < 4; i++) {
-			storage[victim_p+i] = data[frame+i];
-			data[frame+i] = storage[p];
+		for(int i = 0; i < 32; i++) {
+			storage[victim_p*32+i] = data[frame+i];
+			data[frame+i] = storage[p*32+i];
 		}
-		pt[victim_index] = ((p<<15)&frame);
+		pt[victim_index] = ((p<<15)|frame);
 		latest_time[victim_index] = cur_time;
 		return frame + offset;
 	}
@@ -97,8 +104,8 @@ __device__ u32 paging(uchar *data, u32 p, u32 offset) {
 }
 __device__ void init_pageTable(int pt_entries) {
 	cur_time = 0;
-	for(int i = 0; i < pt_entries; i++) {
-		pt[i] = (i<<15); //若還沒做Gwrite就做Gread可能會得到無意義的值，但這是使用者的錯誤，not my business.
+	for(int i = 0; i < PAGE_ENTRIES; i++) {
+		pt[i] = i*32;
 		latest_time[i] = 0;
 	}
 }
@@ -113,17 +120,17 @@ __device__ uchar Gread(uchar *data, u32 addr) {
 }
 
 __device__ void Gwrite(uchar *data, u32 addr, uchar value) {
-	/*u32 p = addr/PAGESIZE;*/
-	/*u32 offset = addr%PAGESIZE;*/
+	u32 p = addr/PAGESIZE;
+	u32 offset = addr%PAGESIZE;
 
-	/*addr = paging(data, p, offset);*/
-	data[1] = value;
+	addr = paging(data, p, offset);
+	data[addr] = value;
 }
 
 __device__ void snapshot(uchar *result, uchar *data, int offset, int input_size) {
-	int tmp = PAGEFAULT;
-	for(int i = 0; i < input_size; i++) result[i] = Gread(data, i + offset);
-	PAGEFAULT = tmp;
+	for(int i = 0; i < input_size; i++) {
+		result[i] = Gread(data, i + offset);
+	}
 }
 
 __global__ void mykernel(int input_size) {
@@ -134,7 +141,6 @@ __global__ void mykernel(int input_size) {
 	init_pageTable(pt_entries);
 
 	//####Gwrite/Gread code section start####
-	input_size = 12;
 	for(int i = 0; i < input_size; i++) Gwrite(data, i, input[i]);
 	for(int i = input_size-1; i >= input_size-10; i--) int value = Gread(data, i);
 
@@ -147,7 +153,7 @@ int main() {
 	int input_size = load_binaryFile(DATAFILE, input, STORAGE_SIZE);
 
 	cudaSetDevice(3);
-	mykernel<<<1, 1, 16384>>>(input_size);
+	mykernel<<<1, 4, 16384>>>(input_size/4);
 	cudaDeviceSynchronize();
 	cudaDeviceReset();
 

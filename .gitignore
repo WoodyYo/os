@@ -1,3 +1,4 @@
-*.out
+vm
+mvm
 test*
 snapshot.bin

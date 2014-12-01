@@ -1,5 +1,8 @@
 default:
-	nvcc -arch=sm_30 main.cu 
+	nvcc -arch=sm_30 main.cu -o vm
+
+bonus:
+	nvcc -arch=sm_30 bonus.cu -o mvm
 
 clean:
-	rm -f *.out snapshot.bin
+	rm -f *vm snapshot.bin

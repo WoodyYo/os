@@ -2,11 +2,10 @@
 #include <stdlib.h>
 #include <inttypes.h>
 
-//
 #define PAGESIZE 32
-//
+
 #define PHYSICAL_MEM_SIZE 32768
-//
+
 #define STORAGE_SIZE 131072
 
 #define DATAFILE "./data.bin"
@@ -14,6 +13,8 @@
 
 #define MASK 32767
 #define TIME_MAX 4294967295
+#define MEMORY_SEGMENT 32768
+
 typedef unsigned char uchar;
 typedef uint32_t u32;
 
@@ -52,6 +53,10 @@ void write_binaryFIle(const char *filename, uchar *a, int size) {
 }
 
 __device__ u32 lru() {
+	/****
+	  實作queue來解決lru並無法解決效能瓶頸，因為最大的問題卡在find的O(n)
+	  要改善find的效能，應實作binary search tree，but...
+	 ***/
 	u32 min = TIME_MAX;
 	int victim_index = 0;
 	for(int i = 0; i < PAGE_ENTRIES; i++) {
