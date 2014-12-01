@@ -11,7 +11,8 @@
 #define DATAFILE "./data.bin"
 #define OUTFILE "./snapshot.bin"
 
-#define MASK 32767
+#define F_MASK 32767
+#define P_MASK 4096
 #define TIME_MAX 4294967295
 #define MEMORY_SEGMENT 32768
 
@@ -67,7 +68,8 @@ __device__ u32 lru() {
 	for(int i = 0; i < PAGE_ENTRIES; i++) {
 		if(latest_time[i] == 0) return i;
 		else {
-			if(latest_time[i] < min) {
+			u32 cur_id = pt[i]>>27;
+			if(cur_id == threadIdx.x && latest_time[i] < min) {
 				min = latest_time[i];
 				victim_index = i;
 			}
@@ -77,9 +79,8 @@ __device__ u32 lru() {
 }
 __device__ int find(u32 p) {
 	for(int i = 0; i < PAGE_ENTRIES; i++) {
-		u32 cur_p = (pt[i]>>15);
-		/*if(cur_time < 35) printf("i=%d, pt[]=%d\n", i, pt[i]);*/
-		if(cur_p == p) {
+		u32 cur_p_id = (pt[i]>>15);
+		if(cur_p_id == (p|(threadIdx.x<<15))) {
 			if(latest_time[i] == 0) return -1;
 			else return i;
 		}
@@ -88,23 +89,23 @@ __device__ int find(u32 p) {
 }
 __device__ u32 paging(uchar *data, u32 p, u32 offset) {
 	if(cur_time < TIME_MAX) cur_time++;
-	int p_index = find(p);
+	int p_index = find(p); //should only return the page that is of same id
 	if(p_index == -1) {  //page fault!!
 		PAGEFAULT++;
-		u32 victim_index = lru();
-		u32 frame = pt[victim_index]&MASK;
-		u32 victim_p = (pt[victim_index] >> 15);
+		u32 victim_index = lru(); //should only return the page that is of same id, OR that is not used, since I can't see another thread's data[]
+		u32 frame = pt[victim_index]&F_MASK;
+		u32 victim_p = (pt[victim_index] >> 15)&P_MASK;
 		for(int i = 0; i < 32; i++) {
-			storage[victim_p*32+i] = data[frame+i];
-			data[frame+i] = storage[p*32+i];
+			storage[threadIdx.x*MEMORY_SEGMENT+victim_p*32+i] = data[frame+i];
+			data[frame+i] = storage[threadIdx.x*MEMORY_SEGMENT+p*32+i];
 		}
-		pt[victim_index] = ((p<<15)|frame);
+		pt[victim_index] = ((threadIdx.x<<27)|(p<<15)|frame);
 		latest_time[victim_index] = cur_time;
 		return frame + offset;
 	}
 	else {
 		latest_time[p_index] = cur_time;
-		return (pt[p_index]&MASK) + offset;
+		return (pt[p_index]&F_MASK) + offset;
 	}
 }
 __device__ void init_pageTable(int pt_entries) {
@@ -139,7 +140,7 @@ __device__ void snapshot(uchar *result, uchar *data, int offset, int input_size)
 }
 
 __global__ void mykernel(int input_size) {
-	__shared__ uchar data[PHYSICAL_MEM_SIZE];
+	__shared__ uchar data[PHYSICAL_MEM_SIZE/4];
 	//get page table entries
 	int pt_entries = PHYSICAL_MEM_SIZE/PAGESIZE;
 
