@@ -11,8 +11,7 @@
 #define DATAFILE "./data.bin"
 #define OUTFILE "./snapshot.bin"
 
-#define F_MASK 32767
-#define P_MASK 4096
+#define MASK 32767
 #define TIME_MAX 4294967295
 #define MEMORY_SEGMENT 32768
 
@@ -38,9 +37,6 @@ __device__ __managed__ uchar input[STORAGE_SIZE];
 
 //page table
 extern __shared__ u32 pt[];
-__device__ __managed__ u32 latest_time[1024];
-
-__device__ __managed__ u32 cur_time;
 
 /******BLABLABLA~~****/
 int load_binaryFile(const char *filename, uchar *a, int max_size) {
@@ -59,60 +55,61 @@ void write_binaryFIle(const char *filename, uchar *a, int size) {
 }
 
 __device__ u32 lru() {
+	int offset = threadIdx.x*PAGE_ENTRIES/4;
 	/****
 	  實作queue來解決lru並無法解決效能瓶頸，因為最大的問題卡在find的O(n)
 	  要改善find的效能，應實作binary search tree，but...
 	 ***/
 	u32 min = TIME_MAX;
 	int victim_index = 0;
-	for(int i = 0; i < PAGE_ENTRIES; i++) {
-		if(latest_time[i] == 0) return i;
+	for(int i = 0; i < PAGE_ENTRIES/4; i++) {
+		if(pt[PAGE_ENTRIES+i+offset] == 0) return i+offset;
 		else {
-			u32 cur_id = pt[i]>>27;
-			if(cur_id == threadIdx.x && latest_time[i] < min) {
-				min = latest_time[i];
+			if(pt[PAGE_ENTRIES+i+offset] < min) {
+				min = pt[PAGE_ENTRIES+i+offset];
 				victim_index = i;
 			}
 		}
 	}
-	return victim_index;
+	return victim_index+offset;
 }
 __device__ int find(u32 p) {
-	for(int i = 0; i < PAGE_ENTRIES; i++) {
-		u32 cur_p_id = (pt[i]>>15);
-		if(cur_p_id == (p|(threadIdx.x<<15))) {
-			if(latest_time[i] == 0) return -1;
-			else return i;
+	int offset = threadIdx.x*PAGE_ENTRIES/4;
+	for(int i = 0; i < PAGE_ENTRIES/4; i++) {
+		u32 cur_p= (pt[i+offset]>>15);
+		if(cur_p == p) {
+			if(pt[PAGE_ENTRIES+i+offset] == 0) return -1;
+			else return i+offset;
 		}
 	}
 	return -1;
 }
 __device__ u32 paging(uchar *data, u32 p, u32 offset) {
-	if(cur_time < TIME_MAX) cur_time++;
+	if(pt[PAGE_ENTRIES*2] < TIME_MAX) pt[PAGE_ENTRIES*2]++;
 	int p_index = find(p); //should only return the page that is of same id
 	if(p_index == -1) {  //page fault!!
 		PAGEFAULT++;
-		u32 victim_index = lru(); //should only return the page that is of same id, OR that is not used, since I can't see another thread's data[]
-		u32 frame = pt[victim_index]&F_MASK;
-		u32 victim_p = (pt[victim_index] >> 15)&P_MASK;
+		u32 victim_index = lru(); //should only return the page that is of same id, since I can't see another thread's data[]
+		u32 frame = pt[victim_index]&MASK;
+		u32 victim_p = (pt[victim_index] >> 15);
 		for(int i = 0; i < 32; i++) {
 			storage[threadIdx.x*MEMORY_SEGMENT+victim_p*32+i] = data[frame+i];
 			data[frame+i] = storage[threadIdx.x*MEMORY_SEGMENT+p*32+i];
 		}
-		pt[victim_index] = ((threadIdx.x<<27)|(p<<15)|frame);
-		latest_time[victim_index] = cur_time;
+		pt[victim_index] = ((p<<15)|frame);
+		pt[PAGE_ENTRIES+victim_index] = pt[PAGE_ENTRIES*2];
 		return frame + offset;
 	}
 	else {
-		latest_time[p_index] = cur_time;
-		return (pt[p_index]&F_MASK) + offset;
+		pt[PAGE_ENTRIES+p_index] = pt[PAGE_ENTRIES*2];
+		return (pt[p_index]&MASK) + offset;
 	}
 }
 __device__ void init_pageTable(int pt_entries) {
-	cur_time = 0;
+	pt[PAGE_ENTRIES*2] = 0;
 	for(int i = 0; i < PAGE_ENTRIES; i++) {
-		pt[i] = i*32;
-		latest_time[i] = 0;
+		pt[i] = i*32%(PAGE_ENTRIES/4);
+		pt[PAGE_ENTRIES+i] = 0;
 	}
 }
 /*********************/

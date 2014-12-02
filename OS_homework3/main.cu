@@ -33,8 +33,6 @@ __device__ __managed__ uchar input[STORAGE_SIZE];
 //page table
 extern __shared__ u32 pt[];
 
-__device__ __managed__ u32 cur_time;
-
 /******BLABLABLA~~****/
 int load_binaryFile(const char *filename, uchar *a, int max_size) {
 	FILE *fp = fopen(filename, "rb");
@@ -72,7 +70,6 @@ __device__ u32 lru() {
 __device__ int find(u32 p) {
 	for(int i = 0; i < PAGE_ENTRIES; i++) {
 		u32 cur_p = (pt[i]>>15);
-		/*if(cur_time < 35) printf("i=%d, pt[]=%d\n", i, pt[i]);*/
 		if(cur_p == p) {
 			if(pt[PAGE_ENTRIES+i] == 0) return -1;
 			else return i;
@@ -81,7 +78,7 @@ __device__ int find(u32 p) {
 	return -1;
 }
 __device__ u32 paging(uchar *data, u32 p, u32 offset) {
-	if(cur_time < TIME_MAX) cur_time++;
+	if(pt[PAGE_ENTRIES*2] < TIME_MAX) pt[PAGE_ENTRIES*2]++;
 	int p_index = find(p);
 	if(p_index == -1) {  //page fault!!
 		PAGEFAULT++;
@@ -93,16 +90,16 @@ __device__ u32 paging(uchar *data, u32 p, u32 offset) {
 			data[frame+i] = storage[p*32+i];
 		}
 		pt[victim_index] = ((p<<15)|frame);
-		pt[PAGE_ENTRIES+victim_index] = cur_time;
+		pt[PAGE_ENTRIES+victim_index] = pt[PAGE_ENTRIES*2];
 		return frame + offset;
 	}
 	else {
-		pt[PAGE_ENTRIES+p_index] = cur_time;
+		pt[PAGE_ENTRIES+p_index] = pt[PAGE_ENTRIES*2];
 		return (pt[p_index]&MASK) + offset;
 	}
 }
 __device__ void init_pageTable(int pt_entries) {
-	cur_time = 0;
+	pt[PAGE_ENTRIES*2] = 0;
 	for(int i = 0; i < PAGE_ENTRIES; i++) {
 		pt[i] = i*32;
 		pt[PAGE_ENTRIES+i] = 0;
