@@ -108,7 +108,7 @@ __device__ u32 paging(uchar *data, u32 p, u32 offset) {
 __device__ void init_pageTable(int pt_entries) {
 	pt[PAGE_ENTRIES*2] = 0;
 	for(int i = 0; i < PAGE_ENTRIES; i++) {
-		pt[i] = (i*32)%(PAGE_ENTRIES/4);
+		pt[i] = i*32%(PAGE_ENTRIES/4);
 		pt[PAGE_ENTRIES+i] = 0;
 	}
 }
@@ -133,12 +133,11 @@ __device__ void Gwrite(uchar *data, u32 addr, uchar value) {
 __device__ void snapshot(uchar *result, uchar *data, int offset, int input_size) {
 	for(int i = 0; i < input_size; i++) {
 		result[i] = Gread(data, i + offset);
-		printf("id=%d, i=%d (%d, %d)\n", threadIdx.x, i, storage[i+MEMORY_SEGMENT*threadIdx.x], result[i]);
 	}
 }
 
 __global__ void mykernel(int input_size) {
-	__shared__ uchar data[32768];
+	__shared__ uchar data[PHYSICAL_MEM_SIZE/4];
 	//get page table entries
 	int pt_entries = PHYSICAL_MEM_SIZE/PAGESIZE;
 
@@ -148,17 +147,17 @@ __global__ void mykernel(int input_size) {
 
 	//####Gwrite/Gread code section start####
 	__LOCK();
-	for(int i = 0; i < input_size; i++) Gwrite(data, i, input[i+__GET_BASE()]);
+	for(int i = 0; i < input_size; i++) Gwrite(data, i+__GET_BASE(), input[i]);
 	__UNLOCK();
 	for(int i = input_size-1; i >= input_size-10; i--) {
 		__LOCK();
-		int value = Gread(data, i);
+		int value = Gread(data, i+__GET_BASE());
 		__UNLOCK();
 	}
 
 	//the last line of Gwrite/Gread code section should be snapshot()
 	__LOCK();
-	snapshot(result+__GET_BASE(), data, 0, input_size);
+	snapshot(result+__GET_BASE(), data, __GET_BASE(), input_size);
 	__UNLOCK();
 	//####Gwrite/Gread code section end####
 }
