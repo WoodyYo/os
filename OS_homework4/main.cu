@@ -13,7 +13,7 @@
 #define ERROR 65535
 
 #define DATAFILE "data.bin"
-#define OUTFILE "snapshot.bon"
+#define OUTFILE "snapshot.bin"
 #define G_WRITE 0
 #define G_READ 1
 #define WRITE_SUCCESS 0
@@ -128,6 +128,7 @@ void write_binaryFIle(const char *filename, uchar *a, int size) {
 	fwrite(a, sizeof(uchar), size, fp);
 }
 __device__ void init_volume() {
+	write2bytes(0, TIME_LOC); //time init
 	for(int i = 0; i < INODE_COUNT; i++) {
 		int cur = INODE_LOC(i);
 		volume[cur] = 0; //set empty
@@ -211,7 +212,7 @@ __device__ void gsys(uchar arg, const char *file) {
 		}
 		for(int i = 0; i < n; i++) {
 			for(int j = i+1; j < n; j++) {
-				if(read2bytes(a[i]+5) > read2bytes(a[j]+5)) {
+				if(read2bytes(a[i]+5) < read2bytes(a[j]+5)) {
 					int tmp = a[i];
 					a[i] = a[j];
 					a[j] = tmp;

@@ -1,5 +1,6 @@
 #Compiling Issue
 直接 $ make即可
+
 執行程式則 $./fs
 
 #MEMO
