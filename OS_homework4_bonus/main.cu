@@ -155,12 +155,11 @@ __device__ void free_room(int tar) {
 }
 __device__ void my_pwd(int i) {
 	if(i == 0) {
-		printf("/");
 		return;
 	}
 	int father = inode_id(i, 1);
 	my_pwd(father);
-	printf("%s", name(i));
+	printf("/%s", name(i));
 }
 
 __global__ void mykernel(uchar *input, uchar *output) {
@@ -170,10 +169,17 @@ __global__ void mykernel(uchar *input, uchar *output) {
 	write(input, 30, fpa);
 	write(input, 10, fpa);
 	read(output, 5, fpa);
-	gsys(MKDIR, "haha\0");
+	gsys(MKDIR, "fxxk\0");
+	gsys(LS_D);
+	gsys(CD, "fxxk\0");
+	gsys(MKDIR, "ur\0");
+	gsys(CD, "ur\0");
+	fpa = open("mother\0", G_WRITE);
+	write(input, 100, fpa);
+	read(output, 99, fpa);
+	gsys(PWD);
 	gsys(LS_S);
-	/*gsys(CD, "hahah\0");*/
-	gsys(CD, "haha\0");
+	gsys(CD_P);
 	gsys(PWD);
 	//####kernel end####
 }
