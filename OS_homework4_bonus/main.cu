@@ -30,6 +30,7 @@
 #define PWD 3
 #define CD 4
 #define CD_P 5
+#define MKDIR 6
 
 #define TIME_LOC DATA_START-2
 #define TIME (read2bytes(TIME_LOC))
@@ -38,7 +39,8 @@
 #define CUR_DIR_LOC DATA_START-4
 #define CUR_DIR (read2bytes(CUR_DIR_LOC))
 #define SET_CUR_DIR(i) (write2bytes(i, CUR_DIR_LOC))
-#define MAX_CAPACITY 50
+
+#define MAX_CAPACITY 60
 
 typedef unsigned char uchar;
 typedef uint32_t u32;
@@ -74,38 +76,6 @@ __device__ int read2bytes(int i) {
 __device__ void write2bytes(int num, int i) {
 	volume[i+1] = num;
 	volume[i] = (num>>8);
-}
-__device__ int find_room() {
-	int i = read2bytes(0);
-	int cur = INODE_LOC(i);
-	int j = read2bytes(cur+1);
-	cur = INODE_LOC(j);
-	int k = read2bytes(cur+1);
-	write2bytes(k, 0);
-	//put the file in cur_dir
-	int curi = INODE_LOC(CUR_DIR);
-	int n = read2bytes(curi+3);
-	int curb = BLOCK_LOC(CUR_DIR);
-	write2bytes(j, curb + n*2);
-	write2bytes(n+1, curi+3);
-
-	return j;
-}
-__device__ void free_room(int v) {
-	int i = read2bytes(0);
-	int cur = INODE_LOC(v);
-	isempty(i, 0); //set to empty
-	write2bytes(v, 0);
-	write2bytes(i, cur+1);
-}
-__device__ void my_pwd(int i) {
-	if(i == 0) {
-		printf("/");
-		return;
-	}
-	int father = child(i, 0);
-	my_pwd(father);
-	printf("%s", name(i));
 }
 __device__ int isempty(int i, int v=-1) {
 	int cur = INODE_LOC(i);
@@ -143,27 +113,54 @@ __device__ int isdir(int i, int v=-1) {
 	else volume[cur+28] = v;
 	return 0;
 }
-__device__ int child(int i, int num, int v=-1) {
+__device__ int inode_id(int i, int num, int v=-1) {
+	//直接call這個函數，就有next_empty_child(i, num, 0)的效果
 	int cur = BLOCK_LOC(i);
-	if(v == -1) {
-		int _father = read2bytes(cur + num*2);
-		return (_father & 1023);
-	}
-	else {
-		int memo = (volume[cur + num*2] & 64512); //1111110000000000
-		write2bytes(v, cur + num*2);
-		volume[cur + num*2] |= memo;
-		return 0;
-	}
+	if(v == -1) return read2bytes(cur + num*2);
+	else write2bytes(v, cur + num*2);
+	return 0;
 }
-__device__ int next_child(int i, int num, int v=-1) {
+__device__ int next_empty_child(int i, int num, int v=-1) {
 	int cur = BLOCK_LOC(i);
-	if(v == -1) return (volume[cur + num*2]>>10);
-	else {
-		volume[cur + num*2] &= 1023;
-		volume[cur + num*2] |= (v<<10);
-		return 0;
+	if(v == -1) return (volume[cur + num*2]>>2);
+	else volume[cur + num*2] = (v<<2);
+	return 99;
+}
+__device__ int find_room() {
+	int i = read2bytes(0);
+	int j = next_empty(i);
+	int k = next_empty(j);
+	write2bytes(k, 0);
+	//put the file in cur_dir
+	int cur_dir = CUR_DIR;
+	int ii = next_empty_child(cur_dir, 0);
+	int jj = next_empty_child(cur_dir, ii);
+	int kk = next_empty_child(cur_dir, jj);
+	next_empty_child(cur_dir, 0, kk);
+	inode_id(cur_dir, ii, i); //point ii in cur_dir to "inode i"
+
+	return i;
+}
+__device__ void free_room(int tar) {
+	int cur_dir = CUR_DIR; //不會跨目錄刪除？
+	//free from directory
+	int i = next_empty_child(cur_dir, 0);
+	next_empty_child(cur_dir, 0, tar);
+	next_empty_child(cur_dir, tar, i);
+	//free inode
+	int tar_inode = inode_id(cur_dir, tar);
+	i = read2bytes(0);
+	next_empty(0, tar_inode);
+	next_empty(tar_inode, i);
+}
+__device__ void my_pwd(int i) {
+	if(i == 0) {
+		printf("/");
+		return;
 	}
+	int father = inode_id(i, 1);
+	my_pwd(father);
+	printf("%s", name(i));
 }
 
 __global__ void mykernel(uchar *input, uchar *output) {
@@ -172,9 +169,12 @@ __global__ void mykernel(uchar *input, uchar *output) {
 	u32 fpa = open("a.txt\0", G_WRITE);
 	write(input, 30, fpa);
 	write(input, 10, fpa);
-	gsys(LS_S);
-	gsys(LS_D);
 	read(output, 5, fpa);
+	gsys(MKDIR, "haha\0");
+	gsys(LS_S);
+	/*gsys(CD, "hahah\0");*/
+	gsys(CD, "haha\0");
+	gsys(PWD);
 	//####kernel end####
 }
 int main() {
@@ -210,12 +210,18 @@ void write_binaryFIle(const char *filename, uchar *a, int size) {
 	fwrite(a, sizeof(uchar), size, fp);
 }
 __device__ void init_volume() {
+	write2bytes(1, 0); //first empty = 1
 	// create root dir
 	isempty(0, 1); //not empty
 	size(0, 0); //capacity
 	timestamp(0, 0); //timestamp
 	name(0, "/\0");
 	isdir(0, 1); //is a dir
+
+	next_empty_child(0, 0, 2);  //0 is superblock, 1 is ./ , starts from 2
+	for(int i = 2; i < MAX_CAPACITY; i++) {
+		next_empty_child(0, i, i+1); //point to next
+	}
 	SET_CUR_DIR(0); //set cur_dir to root
 
 	INC_TIME; //time init
@@ -239,8 +245,8 @@ __device__ u32 open(const char *file, uchar mode) {
 		next_empty(i, 0); //set fp to 0
 		size(i, 0); //set size to 0
 		timestamp(i, TIME); //set timestamp
-		INC_TIME; //increase time
 		name(i, file); //set name
+		INC_TIME; //increase time
 		return i;
 	}
 	else return ERROR;
@@ -271,14 +277,15 @@ __device__ void gsys(uchar arg, const char *file) {
 	if(arg == LS_S) {
 		printf("===sorted by file size===\n");
 		int a[MAX_CAPACITY];
-		int n = read2bytes(curi+3);
-		for(int i = 1; i < n; i++) {
-			a[i-1] = INODE_LOC(curb + i*2);
+		int n = 0;
+		int cur_dir = CUR_DIR;
+		for(int i = 2; i < MAX_CAPACITY; i++) {
+			if(next_empty_child(cur_dir, i) == 0)
+				a[n++] = inode_id(cur_dir, i);
 		}
-		n--;
 		for(int i = 0; i < n; i++) {
 			for(int j = i+1; j < n; j++) {
-				if(read2bytes(a[i]+5) > read2bytes(a[j]+5)) {
+				if(isdir(a[j]) || size(a[i]) >size(a[j])) {
 					int tmp = a[i];
 					a[i] = a[j];
 					a[j] = tmp;
@@ -286,57 +293,74 @@ __device__ void gsys(uchar arg, const char *file) {
 			}
 		}
 		for(int i = 0; i < n; i++) {
-			if(volume[a[i]+28]) printf("%s d\n", volume+a[i]+7);
-			else printf("%s %d\n", volume+a[i]+7, read2bytes(a[i]+3));
+			if(isdir(a[i])) printf("%s d\n", name(a[i]));
+			else printf("%s %d\n", name(a[i]), size(a[i]));
 		}
 	}
 	else if(arg == LS_D) {
+		printf("===sorted by modified time===\n");
+		int a[MAX_CAPACITY];
+		int n = 0;
+		int cur_dir = CUR_DIR;
+		for(int i = 2; i < MAX_CAPACITY; i++) {
+			if(next_empty_child(cur_dir, i) == 0)
+				a[n++] = inode_id(cur_dir, i);
+		}
+		for(int i = 0; i < n; i++) {
+			for(int j = i+1; j < n; j++) {
+				if(timestamp(a[i]) < timestamp(a[j])) {
+					int tmp = a[i];
+					a[i] = a[j];
+					a[j] = tmp;
+				}
+			}
+		}
+		for(int i = 0; i < n; i++) {
+			if(isdir(a[i])) printf("%s d\n", name(a[i]));
+			else printf("%s\n", name(a[i]));
+		}
 	}
 	else if(arg == PWD) {
 		my_pwd(CUR_DIR);
+		printf("\n");
 	}
 	else if(arg == CD) {
-		int curi = INODE_LOC(CUR_DIR);
-		int n = read2bytes(curi+3);
-		int curb = BLOCK_LOC(CUR_DIR);
-		for(int i = 1; i < n; i++) {
-			int j = read2bytes(curb + i*2);
-			int curi = INODE_LOC(j);
-			if(my_strcmp(volume+curi+7, file) == 0) {
-				if(volume[curi+28]) { //is a dir
-					write2bytes(j, CUR_DIR_LOC);
-				}
-				else printf("%s not a directory!\n", file);
+		int cur_dir = CUR_DIR;
+		for(int i = 2; i < MAX_CAPACITY; i++) {
+			int id = inode_id(cur_dir, i);
+			if(next_empty_child(cur_dir, i) == 0 && my_strcmp(name(id), file) == 0) {
+				if(isdir(id)) SET_CUR_DIR(id);
+				else printf("%s is a file\n", file);
 				return;
 			}
 		}
-		printf("No such directory: %s\n", file);
+		printf("No such directory %s\n", file);
 	}
 	else if(arg == CD_P) {
-		if(CUR_DIR == 0) printf("Already at root\n");
-		else {
-			int cur = BLOCK_LOC(CUR_DIR);
-			int father_i = read2bytes(cur);
-			write2bytes(father_i, CUR_DIR_LOC);
-		}
+		int cur_dir = CUR_DIR;
+		if(cur_dir == 0) printf("alread at root\n");
+		else SET_CUR_DIR(inode_id(cur_dir, 1));
 	}
-	else if(arg == RM) { //NOT EVEN TOUCHED!!
-		int i;
-		for(i = 0; i < INODE_COUNT; i++) {
-			int cur = INODE_LOC(i);
-			if(isempty(i)) { //not empty
-				if(my_strcmp(volume+cur+7, file) == 0) {
-					if(volume[cur+28]) { //isdir
-						printf("Can't remove a dir by rm.\n");
-						return;
-					}
-					else break;
-				}
+	else if(arg == RM) {
+		int cur_dir = CUR_DIR;
+		for(int i = 2; i < MAX_CAPACITY; i++) {
+			int id = inode_id(cur_dir, i);
+			if(next_empty_child(cur_dir, i) == 0 && my_strcmp(name(id), file) == 0) {
+				if(isdir(id)) printf("Can't rm %s, it's a directory\n", file);
+				else free_room(i);
+				return;
 			}
 		}
-		if(i == INODE_COUNT) printf("No such file %s!\n", file);
-		else {
-			free_room(i);
+	}
+	else if(arg == MKDIR) {
+		int tar = find_room();
+		name(tar, file);
+		isdir(tar, 1);
+		isempty(tar, 1);
+		next_empty_child(tar, 0, 2);  //0 is superblock, 1 is ../ , starts from 2
+		inode_id(tar, 1, CUR_DIR);
+		for(int i = 2; i < MAX_CAPACITY; i++) {
+			next_empty_child(tar, i, i+1); //point to next
 		}
 	}
 }

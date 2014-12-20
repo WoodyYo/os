@@ -129,6 +129,7 @@ void write_binaryFIle(const char *filename, uchar *a, int size) {
 }
 __device__ void init_volume() {
 	write2bytes(0, TIME_LOC); //time init
+	write2bytes(0, 0);
 	for(int i = 0; i < INODE_COUNT; i++) {
 		int cur = INODE_LOC(i);
 		volume[cur] = 0; //set empty
