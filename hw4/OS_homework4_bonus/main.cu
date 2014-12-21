@@ -137,6 +137,9 @@ __device__ int find_room() {
 	int jj = next_empty_child(cur_dir, ii);
 	next_empty_child(cur_dir, 0, jj);
 	inode_id(cur_dir, ii, i); //point ii in cur_dir to "inode i"
+
+	timestamp(cur_dir, TIME);
+	INC_TIME;
 	return i;
 }
 __device__ void free_room(int tar) {
@@ -150,6 +153,9 @@ __device__ void free_room(int tar) {
 	i = read2bytes(0);
 	next_empty(0, tar_inode);
 	next_empty(tar_inode, i);
+
+	timestamp(cur_dir, TIME);
+	INC_TIME;
 }
 __device__ void my_pwd(int i) {
 	if(i == 0) {
@@ -165,7 +171,7 @@ __global__ void mykernel(uchar *input, uchar *output) {
 	//####kernel start####
 	u32 fp;
 	char s[] = "0000\0";
-	for(int i = 0; i < 1024; i++) {
+	for(int i = 0; i < 500; i++) {
 		s[3] = '0'+i%10;
 		s[2] = '0'+i/10%10;
 		s[1] = '0'+i/100%10;
@@ -185,6 +191,25 @@ __global__ void mykernel(uchar *input, uchar *output) {
 		}
 	}
 	gsys(CD_P);
+	gsys(CD_P);
+	gsys(CD_P);
+	gsys(PWD);
+	gsys(LS_D);
+	for(int i = 310; i < 330; i++) {
+		s[3] = '0'+i%10;
+		s[2] = '0'+i/10%10;
+		s[1] = '0'+i/100%10;
+		s[0] = '0'+i/1000;
+		fp = open(s, G_WRITE);
+		if(fp == ERROR) continue;
+		write(input+i-310, 1024, fp);
+		read(output+(i-310)*512, 1024, fp);
+	}
+	gsys(LS_D);
+	gsys(CD, "0301\0");
+	open("test~\0", G_WRITE);
+	gsys(CD_P);
+	gsys(LS_D);
 	//####kernel end####
 }
 int main() {
@@ -242,12 +267,21 @@ __device__ void init_volume() {
 	}
 }
 __device__ u32 open(char *file, uchar mode) {
-	for(int i = 0; i < INODE_COUNT; i++) {
-		if(my_strcmp(name(i), file) == 0) {
-			next_empty(i, 0); //set fp to 0
-			return i;
+	int cur_dir = CUR_DIR;
+	for(int i = 2; i < MAX_CAPACITY; i++) {
+		int id = inode_id(cur_dir, i);
+		if(next_empty_child(cur_dir, i) == 0 && my_strcmp(name(id), file) == 0) {
+			if(isdir(id)) {
+				printf("%s is a directory\n", file);
+				return ERROR;
+			}
+			else {
+				next_empty(id, 0); //set fp to 0
+				return id;
+			}
 		}
 	}
+
 	if(mode == G_WRITE) { //create
 		int i = find_room();
 		if(i == -1) return ERROR;
@@ -371,6 +405,8 @@ __device__ void gsys(uchar arg, char *file) {
 	else if(arg == MKDIR) {
 		int tar = find_room();
 		name(tar, file);
+		timestamp(tar, TIME);
+		INC_TIME;
 		isdir(tar, 1);
 		isempty(tar, 1);
 		next_empty_child(tar, 0, 2);  //0 is superblock, 1 is ../ , starts from 2
