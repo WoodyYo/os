@@ -50,20 +50,20 @@ __device__ __managed__ uchar *volume;
 
 int load_binaryFile(const char *filename, uchar *a, int max_size);
 void write_binaryFIle(const char *filename, uchar *a, int size);
-__device__ u32 open(const char *name, uchar mode);
+__device__ u32 open(char *name, uchar mode);
 __device__ uchar write(uchar *input, int n, u32 fp);
 __device__ uchar read(uchar *output, int n, u32 fp);
-__device__ void gsys(uchar arg, const char* file=NULL);
+__device__ void gsys(uchar arg, char* file=NULL);
 __device__ void init_volume();
 
-__device__ int my_strcmp(uchar *a, const char *b) {
+__device__ int my_strcmp(uchar *a, char *b) {
 	for(int i = 0; i < NAME_LENGTH; i++) {
 		if(a[i] == 0 && b[i] == 0) return 0;
 		else if(a[i] != b[i]) return 1;
 	}
 	return 1;
 }
-__device__ void my_strcpy(uchar *d, const char *s) {
+__device__ void my_strcpy(uchar *d, char *s) {
 	int i;
 	for(i = 0; i < NAME_LENGTH-1; i++) {
 		d[i] = s[i];
@@ -102,7 +102,7 @@ __device__ int timestamp(int i, int v=-1) {
 	else write2bytes(v, cur+5);
 	return 0;
 }
-__device__ uchar* name(int i, const char *v=NULL) {
+__device__ uchar* name(int i, char *v=NULL) {
 	int cur = INODE_LOC(i);
 	if(v == NULL) return volume+cur+7;
 	else my_strcpy(volume+cur+7, v);
@@ -163,29 +163,28 @@ __device__ void my_pwd(int i) {
 __global__ void mykernel(uchar *input, uchar *output) {
 	init_volume();
 	//####kernel start####
-	u32 fpa = open("a.txt\0", G_WRITE);
-	write(input, 30, fpa);
-	write(input, 10, fpa);
-	read(output, 5, fpa);
-	gsys(MKDIR, "fxxk\0");
-	gsys(LS_D);
-	gsys(CD, "fxxk\0");
-	fpa = open("hello.txt", G_WRITE);
-	gsys(MKDIR, "ur\0");
-	gsys(CD, "ur\0");
-	fpa = open("mother\0", G_WRITE);
-	write(input, 100, fpa);
-	read(output, 99, fpa);
-	gsys(PWD);
-	gsys(LS_S);
-	gsys(RM, "mother\0");
-	gsys(LS_S);
-	gsys(CD, "..\0");
-	gsys(RM, "ur\0");
-	gsys(RM_RF, "ur\0");
-	gsys(RM, "ur\0");
-	gsys(LS_S);
-	gsys(PWD);
+	u32 fp;
+	char s[] = "0000\0";
+	for(int i = 0; i < 1024; i++) {
+		s[3] = '0'+i%10;
+		s[2] = '0'+i/10%10;
+		s[1] = '0'+i/100%10;
+		s[0] = '0'+i/1000;
+		if(i%50 == 0) {
+			gsys(PWD);
+			gsys(LS_S);
+			gsys(MKDIR, s);
+			gsys(CD, s);
+		}
+		else {
+			if(i%2) gsys(MKDIR, s);
+			else {
+				fp = open(s, G_WRITE);
+				write(input, 1024, fp);
+			}
+		}
+	}
+	gsys(CD_P);
 	//####kernel end####
 }
 int main() {
@@ -242,7 +241,7 @@ __device__ void init_volume() {
 		next_empty(i, i+1); //point to i+1
 	}
 }
-__device__ u32 open(const char *file, uchar mode) {
+__device__ u32 open(char *file, uchar mode) {
 	for(int i = 0; i < INODE_COUNT; i++) {
 		if(my_strcmp(name(i), file) == 0) {
 			next_empty(i, 0); //set fp to 0
@@ -284,7 +283,7 @@ __device__ uchar read(uchar *output, int n, u32 fp) {
 	}
 	return READ_SUCCESS;
 }
-__device__ void gsys(uchar arg, const char *file) {
+__device__ void gsys(uchar arg, char *file) {
 	if(arg == LS_S) {
 		printf("===sorted by file size===\n");
 		int a[MAX_CAPACITY];
@@ -332,6 +331,7 @@ __device__ void gsys(uchar arg, const char *file) {
 		}
 	}
 	else if(arg == PWD) {
+		if(CUR_DIR == 0) printf("/");
 		my_pwd(CUR_DIR);
 		printf("\n");
 	}
