@@ -37,20 +37,20 @@ __device__ __managed__ uchar *volume;
 
 int load_binaryFile(const char *filename, uchar *a, int max_size);
 void write_binaryFIle(const char *filename, uchar *a, int size);
-__device__ u32 open(const char *name, uchar mode);
-__device__ uchar write(uchar *input, int n, uchar fp);
-__device__ uchar read(uchar *output, int n, uchar fp);
-__device__ void gsys(uchar arg, const char* file=NULL);
+__device__ u32 open(char *name, uchar mode);
+__device__ uchar write(uchar *input, int n, u32 fp);
+__device__ uchar read(uchar *output, int n, u32 fp);
+__device__ void gsys(uchar arg, char* file=NULL);
 __device__ void init_volume();
 
-__device__ int my_strcmp(uchar *a, const char *b) {
+__device__ int my_strcmp(uchar *a, char *b) {
 	for(int i = 0; i < NAME_LENGTH; i++) {
 		if(a[i] == 0 && b[i] == 0) return 0;
 		else if(a[i] != b[i]) return 1;
 	}
 	return 1;
 }
-__device__ void my_strcpy(uchar *d, const char *s) {
+__device__ void my_strcpy(uchar *d, char *s) {
 	int i;
 	for(i = 0; i < NAME_LENGTH-1; i++) {
 		d[i] = s[i];
@@ -83,14 +83,28 @@ __device__ void free_room(int v) {
 __global__ void mykernel(uchar *input, uchar *output) {
 	init_volume();
 	//####kernel start####
-	u32 fpa = open("a.txt\0", G_WRITE);
-	write(input, 30, fpa);
-	u32 fpb = open("b.txt\0", G_WRITE);
-	write(input, 10, fpa);
+	u32 fp;
+	char s[] = "0000.txt\0";
+	for(int i = 0; i < 1024; i++) {
+		s[3] = '0'+i%10;
+		s[2] = '0'+i/10%10;
+		s[1] = '0'+i/100%10;
+		s[0] = '0'+i/1000;
+		fp = open(s, G_WRITE);
+		write(input, 1024, fp);
+	}
 	gsys(LS_S);
-	gsys(RM, "a.txt\0");
+	for(int i = 0; i < 1024; i++) {
+		if(i%2) continue;
+		s[3] = '0'+i%10;
+		s[2] = '0'+i/10%10;
+		s[1] = '0'+i/100%10;
+		s[0] = '0'+i/1000;
+		fp = open(s, G_READ);
+		read(output+512*i, 1024, fp);
+		gsys(RM, s);
+	}
 	gsys(LS_D);
-	read(output, 5, fpa);
 	//####kernel end####
 }
 int main() {
@@ -134,7 +148,7 @@ __device__ void init_volume() {
 		write2bytes(i+1, cur+1); //point to i+1
 	}
 }
-__device__ u32 open(const char *name, uchar mode) {
+__device__ u32 open(char *name, uchar mode) {
 	for(int i = 0; i < INODE_COUNT; i++) {
 		int cur = INODE_LOC(i);
 		if(my_strcmp(volume+cur+7, name) == 0) {
@@ -158,7 +172,7 @@ __device__ u32 open(const char *name, uchar mode) {
 	else return ERROR;
 }
 
-__device__ uchar write(uchar *input, int n, uchar fp) {
+__device__ uchar write(uchar *input, int n, u32 fp) {
 	if(fp == ERROR) return WRITE_ERROR;
 	if(n > BLOCK_SIZE) return WRITE_ERROR;
 	int cur = INODE_LOC(fp);
@@ -172,7 +186,7 @@ __device__ uchar write(uchar *input, int n, uchar fp) {
 	}
 	return WRITE_SUCCESS;
 }
-__device__ uchar read(uchar *output, int n, uchar fp) {
+__device__ uchar read(uchar *output, int n, u32 fp) {
 	if(fp == ERROR) return READ_ERROR;
 	if(n > BLOCK_SIZE) return READ_ERROR;
 	int cur_block = DATA_START + fp*BLOCK_SIZE;
@@ -181,7 +195,7 @@ __device__ uchar read(uchar *output, int n, uchar fp) {
 	}
 	return READ_SUCCESS;
 }
-__device__ void gsys(uchar arg, const char *file) {
+__device__ void gsys(uchar arg, char *file) {
 	if(arg == LS_S) {
 		printf("===sorted by file size===\n");
 		int a[INODE_COUNT];
