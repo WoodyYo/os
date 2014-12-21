@@ -69,10 +69,8 @@ __device__ int find_room() {
 	int i = read2bytes(0);
 	int cur = INODE_LOC(i);
 	int j = read2bytes(cur+1);
-	cur = INODE_LOC(j);
-	int k = read2bytes(cur+1);
-	write2bytes(k, 0);
-	return j;
+	write2bytes(j, 0);
+	return i;
 }
 __device__ void free_room(int v) {
 	int i = read2bytes(0);

@@ -31,6 +31,7 @@
 #define CD 4
 #define CD_P 5
 #define MKDIR 6
+#define RM_RF 7
 
 #define TIME_LOC DATA_START-2
 #define TIME (read2bytes(TIME_LOC))
@@ -129,16 +130,13 @@ __device__ int next_empty_child(int i, int num, int v=-1) {
 __device__ int find_room() {
 	int i = read2bytes(0);
 	int j = next_empty(i);
-	int k = next_empty(j);
-	write2bytes(k, 0);
+	write2bytes(j, 0);
 	//put the file in cur_dir
 	int cur_dir = CUR_DIR;
 	int ii = next_empty_child(cur_dir, 0);
 	int jj = next_empty_child(cur_dir, ii);
-	int kk = next_empty_child(cur_dir, jj);
-	next_empty_child(cur_dir, 0, kk);
+	next_empty_child(cur_dir, 0, jj);
 	inode_id(cur_dir, ii, i); //point ii in cur_dir to "inode i"
-
 	return i;
 }
 __device__ void free_room(int tar) {
@@ -172,6 +170,7 @@ __global__ void mykernel(uchar *input, uchar *output) {
 	gsys(MKDIR, "fxxk\0");
 	gsys(LS_D);
 	gsys(CD, "fxxk\0");
+	fpa = open("hello.txt", G_WRITE);
 	gsys(MKDIR, "ur\0");
 	gsys(CD, "ur\0");
 	fpa = open("mother\0", G_WRITE);
@@ -179,7 +178,13 @@ __global__ void mykernel(uchar *input, uchar *output) {
 	read(output, 99, fpa);
 	gsys(PWD);
 	gsys(LS_S);
-	gsys(CD_P);
+	gsys(RM, "mother\0");
+	gsys(LS_S);
+	gsys(CD, "..\0");
+	gsys(RM, "ur\0");
+	gsys(RM_RF, "ur\0");
+	gsys(RM, "ur\0");
+	gsys(LS_S);
 	gsys(PWD);
 	//####kernel end####
 }
@@ -331,6 +336,10 @@ __device__ void gsys(uchar arg, const char *file) {
 		printf("\n");
 	}
 	else if(arg == CD) {
+		if(my_strcmp((uchar*)file, "..\0") == 0) {
+			gsys(CD_P);
+			return;
+		}
 		int cur_dir = CUR_DIR;
 		for(int i = 2; i < MAX_CAPACITY; i++) {
 			int id = inode_id(cur_dir, i);
@@ -347,16 +356,17 @@ __device__ void gsys(uchar arg, const char *file) {
 		if(cur_dir == 0) printf("alread at root\n");
 		else SET_CUR_DIR(inode_id(cur_dir, 1));
 	}
-	else if(arg == RM) {
+	else if(arg == RM || arg == RM_RF) {
 		int cur_dir = CUR_DIR;
 		for(int i = 2; i < MAX_CAPACITY; i++) {
 			int id = inode_id(cur_dir, i);
 			if(next_empty_child(cur_dir, i) == 0 && my_strcmp(name(id), file) == 0) {
-				if(isdir(id)) printf("Can't rm %s, it's a directory\n", file);
+				if(isdir(id) && arg == RM) printf("Can't rm %s, it's a directory\n", file);
 				else free_room(i);
 				return;
 			}
 		}
+		printf("No such file or directory %s\n", file);
 	}
 	else if(arg == MKDIR) {
 		int tar = find_room();
