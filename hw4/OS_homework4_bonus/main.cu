@@ -141,7 +141,10 @@ __device__ int next_empty_child(int i, int num, int v=-1) {
 	return 99;
 }
 __device__ int find_room(int dir) {
+	//find room in inode
 	int i = read2bytes(0);
+	if(i >= INODE_COUNT) return ERROR; //超過inode容量
+	else if(next_empty_child(dir, 0) >= MAX_CAPACITY) return ERROR; //超過directory容量
 	int j = next_empty(i);
 	write2bytes(j, 0);
 	//put the file in dir
@@ -156,15 +159,16 @@ __device__ int find_room(int dir) {
 	return i;
 }
 __device__ void free_room(int tar, int dir) { //tar is "在 dir 中的位置", not abs id!!!
-	//free from directory
-	int i = next_empty_child(dir, 0);
-	next_empty_child(dir, 0, tar);
-	next_empty_child(dir, tar, i);
+	//!!不知名的原因會把superblock設為零！！
 	//free inode
 	int id = inode_id(dir, tar);
-	i = read2bytes(0);
-	next_empty(0, id);
-	next_empty(id, i);
+	int tmp = read2bytes(0);
+	write2bytes(id, 0);
+	next_empty(id, tmp);
+	//free from directory 順序不能變！！！
+	tmp = next_empty_child(dir, 0);
+	next_empty_child(dir, 0, tar);
+	next_empty_child(dir, tar, tmp);
 
 	timestamp(dir, TIME);
 	INC_TIME;
@@ -200,11 +204,11 @@ __device__ int find_by_name(char *file, int dir, int *last_dir) { //return "在d
 		else s[n] = ch;
 	}
 }
-__device__ void free_dir(int tar_dir, int dir) {
+__device__ void free_dir(int tar_dir, int dir) { //tar_dir = position in dir
 	for(int i = 2; i < MAX_CAPACITY; i++) {
 		if(next_empty_child(tar_dir, i) == 0) {
 			int id = inode_id(tar_dir, i);
-			if(isdir(id)) free_dir(id, tar_dir);
+			if(isdir(id)) free_dir(i, tar_dir);
 			else free_room(i, tar_dir);
 		}
 	}
@@ -222,6 +226,49 @@ __device__ void my_pwd(int i) {
 __global__ void mykernel(uchar *input, uchar *output) {
 	init_volume();
 	//####kernel start####
+	u32 fp;
+	char s[] = "0000.txt\0";
+	for(int i = 0; i < 50; i++) {
+		s[3] = '0'+i%10;
+		s[2] = '0'+i/10%10;
+		s[1] = '0'+i/100%10;
+		s[0] = '0'+i/1000;
+		fp = open(s, G_WRITE);
+		write(input, 1024, fp);
+	}
+
+	for(int i = 0; i < 50; i++) {
+		if(i%2) continue;
+		s[3] = '0'+i%10;
+		s[2] = '0'+i/10%10;
+		s[1] = '0'+i/100%10;
+		s[0] = '0'+i/1000;
+		fp = open(s, G_READ);
+		read(output+512*i, 1024, fp);
+		gsys(RM, s);
+	}
+
+	s[5] = 'x';
+	for(int i = 0; i < 50; i++) {
+		if(i%2 == 0) continue;
+		s[3] = '0'+i%10;
+		s[2] = '0'+i/10%10;
+		s[1] = '0'+i/100%10;
+		s[0] = '0'+i/1000;
+		fp = open(s, G_WRITE);
+		printf("%s\n", s);
+		printf("new got id --> %d\n", fp);
+		write(input, 1024, fp);
+		s[5] = 't';
+		fp = open(s, G_WRITE);
+		write(input, 1024, fp);
+		s[5] = 'x';
+	}
+
+	printf("should sort by create time\n");
+	gsys(LS_S);
+	printf("should sort by modified time\n");
+	gsys(LS_D);
 	//####kernel end####
 }
 int main() {
@@ -289,10 +336,9 @@ __device__ u32 open(char *file, uchar mode) {
 	else if(id != ERROR) return id;
 	else if (mode == G_WRITE) { //create
 		int id = find_room(last_dir);
-		if(id == -1) return ERROR;
+		if(id == ERROR) return ERROR;
 		isdir(id, 0); //set not directory
 		isempty(id, 1); //set not empty
-		next_empty(id, 0); //set fp to 0
 		size(id, 0); //set size to 0
 		timestamp(id, TIME); //set timestamp
 		name(id, file); //set name
@@ -340,7 +386,7 @@ __device__ void gsys(uchar arg, char *file) {
 					a[i] = a[j];
 					a[j] = tmp;
 				}
-				if(size(a[i]) == size(a[j]) && create_time(a[i]) < create_time(a[j])) {
+				else if(size(a[i]) == size(a[j]) && create_time(a[i]) < create_time(a[j])) {
 					int tmp = a[i];
 					a[i] = a[j];
 					a[j] = tmp;
@@ -400,7 +446,9 @@ __device__ void gsys(uchar arg, char *file) {
 		int id = inode_id(last_dir, i);
 		if(id == ERROR) printf("No such file %s\n", file);
 		else if(isdir(id)) printf("%s is s directory, can't remove by RM\n", file);
-		else free_room(i, last_dir); //free_room 吃的是i不是id!!
+		else {
+			free_room(i, last_dir); //free_room 吃的是i不是id!!
+		}
 	}
 	else if(arg == RM_RF) {
 		int last_dir;

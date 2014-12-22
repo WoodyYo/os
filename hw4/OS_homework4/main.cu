@@ -67,6 +67,7 @@ __device__ void write2bytes(int num, int i) {
 }
 __device__ int find_room() {
 	int i = read2bytes(0);
+	if(i == INODE_COUNT) return ERROR;
 	int cur = INODE_LOC(i);
 	int j = read2bytes(cur+1);
 	write2bytes(j, 0);
@@ -93,7 +94,6 @@ __global__ void mykernel(uchar *input, uchar *output) {
 		fp = open(s, G_WRITE);
 		write(input, 1024, fp);
 	}
-	gsys(LS_S);
 	for(int i = 0; i < 1024; i++) {
 		if(i%2) continue;
 		s[3] = '0'+i%10;
@@ -104,6 +104,21 @@ __global__ void mykernel(uchar *input, uchar *output) {
 		read(output+512*i, 1024, fp);
 		gsys(RM, s);
 	}
+	s[5] = 'x';
+	for(int i = 0; i < 1024; i++) {
+		if(i%2 == 0) continue;
+		s[3] = '0'+i%10;
+		s[2] = '0'+i/10%10;
+		s[1] = '0'+i/100%10;
+		s[0] = '0'+i/1000;
+		fp = open(s, G_WRITE);
+		write(input, 1024, fp);
+		s[5] = 't';
+		fp = open(s, G_READ);
+		write(input, 1024, fp);
+		s[5] = 'x';
+	}
+	gsys(LS_S);
 	gsys(LS_D);
 	//####kernel end####
 }
@@ -152,7 +167,6 @@ __device__ u32 open(char *name, uchar mode) {
 	for(int i = 0; i < INODE_COUNT; i++) {
 		int cur = INODE_LOC(i);
 		if(my_strcmp(volume+cur+7, name) == 0) {
-			write2bytes(0, cur+1); //set fp to 0
 			return i;
 		}
 	}
