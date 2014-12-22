@@ -108,6 +108,12 @@ __device__ int timestamp(int i, int v=-1) {
 	else write2bytes(v, cur+5);
 	return 0;
 }
+__device__ int create_time(int i, int v=-1) {
+	int cur = INODE_LOC(i);
+	if(v == -1) return read2bytes(cur+1);
+	else write2bytes(v, cur+1);
+	return 0;
+}
 __device__ uchar* name(int i, char *v=NULL) {
 	int cur = INODE_LOC(i);
 	if(v == NULL) return volume+cur+7;
@@ -144,6 +150,7 @@ __device__ int find_room(int dir) {
 	next_empty_child(dir, 0, jj);
 	inode_id(dir, ii, i); //point ii in dir to "inode i"
 
+	create_time(i, TIME);
 	timestamp(dir, TIME);
 	INC_TIME;
 	return i;
@@ -333,6 +340,11 @@ __device__ void gsys(uchar arg, char *file) {
 					a[i] = a[j];
 					a[j] = tmp;
 				}
+				if(size(a[i]) == size(a[j]) && create_time(a[i]) < create_time(a[j])) {
+					int tmp = a[i];
+					a[i] = a[j];
+					a[j] = tmp;
+				}
 			}
 		}
 		for(int i = 0; i < n; i++) {
@@ -412,6 +424,7 @@ __device__ void gsys(uchar arg, char *file) {
 			isdir(id, 1);
 			isempty(id, 1);
 			next_empty_child(id, 0, 2);  //0 is superblock, 1 is ../ , starts from 2
+			size(id, 0);
 			inode_id(id, 1, last_dir);
 			for(int i = 2; i < MAX_CAPACITY; i++) {
 				next_empty_child(id, i, i+1); //point to next

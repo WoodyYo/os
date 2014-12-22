@@ -161,7 +161,7 @@ __device__ u32 open(char *name, uchar mode) {
 		if(i == -1) return ERROR;
 		int cur = INODE_LOC(i);
 		volume[cur] = 1; //set not empty
-		write2bytes(0, cur+1); //set fp to 0
+		write2bytes(TIME, cur+1); //set create time
 		write2bytes(0, cur+3); //set size to 0
 		int time = TIME;
 		write2bytes(time, cur+5); //set timestamp
@@ -206,7 +206,7 @@ __device__ void gsys(uchar arg, char *file) {
 		}
 		for(int i = 0; i < n; i++) {
 			for(int j = i+1; j < n; j++) {
-				if(read2bytes(a[i]+3) > read2bytes(a[j]+3)) {
+				if(read2bytes(a[i]+3) > read2bytes(a[j]+3) || (read2bytes(a[i]+3) == read2bytes(a[j]+3) && read2bytes(a[i]+1) < read2bytes(a[j]+1))) {
 					int tmp = a[i];
 					a[i] = a[j];
 					a[j] = tmp;
