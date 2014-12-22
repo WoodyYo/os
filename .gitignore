@@ -4,3 +4,4 @@ snapshot.bin
 a.out
 *.pyc
 log*
+*.txt

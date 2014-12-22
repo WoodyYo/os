@@ -40,4 +40,6 @@ Meet the spec!!
 
 
 ##Something else
-為什麼不寫個限制存取的API當作volume，要用甚麼cuda?請問這是cuda課嗎?用本來的C語言來寫互動性不是會更好嗎?一些可以在memory裡面用standard library或recursive處理的東西，現在全部要在cuda裡面跑，完全問號。每次編譯都一堆stack overflow的警告，煩死了。
+1.為什麼不寫個限制存取的API當作volume，要用甚麼cuda?請問這是cuda課嗎?用本來的C語言來寫互動性不是會更好嗎?一些可以在memory裡面用standard library或recursive處理的東西，現在全部要在cuda裡面跑，完全問號。每次編譯都一堆stack overflow的警告，煩死了。
+
+2.我在寫的東西明明就是一種library，為什麼要搞個main.cu?這樣測試起來比較方便嗎?
