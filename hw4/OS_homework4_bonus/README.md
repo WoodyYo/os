@@ -1,5 +1,5 @@
 #Compiling Issue
-直接 $ make main即可
+直接 $ make即可
 
 執行程式則 $./ffs
 
@@ -38,4 +38,6 @@ Meet the spec!!
 	|       .       |   .
 	-----------------
 
-實驗證實pwd的遞迴可以跑大約18層，遠大於spec惹~~
+
+##Something else
+為什麼不寫個限制存取的API當作volume，要用甚麼cuda?請問這是cuda課嗎?用本來的C語言來寫互動性不是會更好嗎?一些可以在memory裡面用standard library或recursive處理的東西，現在全部要在cuda裡面跑，完全問號。每次編譯都一堆stack overflow的警告，煩死了。

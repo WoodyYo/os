@@ -65,6 +65,12 @@ __device__ int my_strcmp(uchar *a, char *b) {
 }
 __device__ void my_strcpy(uchar *d, char *s) {
 	int i;
+	int memo = 0;
+	for(i = 0; i < NAME_LENGTH-1; i++) {
+		if(s[i] == 0) break;
+		else if(s[i] == '/') memo = i+1;
+	}
+	s = s+memo;
 	for(i = 0; i < NAME_LENGTH-1; i++) {
 		d[i] = s[i];
 		if(s[i] == 0) return;
@@ -116,6 +122,7 @@ __device__ int isdir(int i, int v=-1) {
 }
 __device__ int inode_id(int i, int num, int v=-1) {
 	//直接call這個函數，就有next_empty_child(i, num, 0)的效果
+	if(num == ERROR) return ERROR;
 	int cur = BLOCK_LOC(i);
 	if(v == -1) return read2bytes(cur + num*2);
 	else write2bytes(v, cur + num*2);
@@ -127,35 +134,74 @@ __device__ int next_empty_child(int i, int num, int v=-1) {
 	else volume[cur + num*2] = (v<<2);
 	return 99;
 }
-__device__ int find_room() {
+__device__ int find_room(int dir) {
 	int i = read2bytes(0);
 	int j = next_empty(i);
 	write2bytes(j, 0);
-	//put the file in cur_dir
-	int cur_dir = CUR_DIR;
-	int ii = next_empty_child(cur_dir, 0);
-	int jj = next_empty_child(cur_dir, ii);
-	next_empty_child(cur_dir, 0, jj);
-	inode_id(cur_dir, ii, i); //point ii in cur_dir to "inode i"
+	//put the file in dir
+	int ii = next_empty_child(dir, 0);
+	int jj = next_empty_child(dir, ii);
+	next_empty_child(dir, 0, jj);
+	inode_id(dir, ii, i); //point ii in dir to "inode i"
 
-	timestamp(cur_dir, TIME);
+	timestamp(dir, TIME);
 	INC_TIME;
 	return i;
 }
-__device__ void free_room(int tar) {
-	int cur_dir = CUR_DIR; //不會跨目錄刪除？
+__device__ void free_room(int tar, int dir) { //tar is "在 dir 中的位置", not abs id!!!
 	//free from directory
-	int i = next_empty_child(cur_dir, 0);
-	next_empty_child(cur_dir, 0, tar);
-	next_empty_child(cur_dir, tar, i);
+	int i = next_empty_child(dir, 0);
+	next_empty_child(dir, 0, tar);
+	next_empty_child(dir, tar, i);
 	//free inode
-	int tar_inode = inode_id(cur_dir, tar);
+	int id = inode_id(dir, tar);
 	i = read2bytes(0);
-	next_empty(0, tar_inode);
-	next_empty(tar_inode, i);
+	next_empty(0, id);
+	next_empty(id, i);
 
-	timestamp(cur_dir, TIME);
+	timestamp(dir, TIME);
 	INC_TIME;
+}
+__device__ int find_by_name(char *file, int dir, int *last_dir) { //return "在dir中的位置"!!!
+	*last_dir = dir; //兒子會把媽媽蓋掉!
+	char ch;
+	char s[NAME_LENGTH]; //String processing in C is garbage!
+	for(int n = 0; ;n++) {
+		ch = file[n];
+		if(ch == 0) {
+			s[n] = 0;
+			for(int i = 2; i < MAX_CAPACITY; i++) {
+				int id = inode_id(dir, i);
+				if(next_empty_child(dir, i) == 0 && my_strcmp(name(id), s) == 0) {
+					return i; //no matter dir or file.
+				}
+			}
+			return ERROR;
+		}
+		if(ch == '/') { //往下層
+			s[n] = 0;
+			for(int i = 2; i < MAX_CAPACITY; i++) {
+				int id = inode_id(dir, i);
+				if(next_empty_child(dir, i) == 0 && my_strcmp(name(id), s) == 0) {
+					if(isdir(id)) return find_by_name(file+n+1, id, last_dir);
+					else break;
+				}
+			}
+			*last_dir = ERROR;
+			return ERROR;
+		}
+		else s[n] = ch;
+	}
+}
+__device__ void free_dir(int tar_dir, int dir) {
+	for(int i = 2; i < MAX_CAPACITY; i++) {
+		if(next_empty_child(tar_dir, i) == 0) {
+			int id = inode_id(tar_dir, i);
+			if(isdir(id)) free_dir(id, tar_dir);
+			else free_room(i, tar_dir);
+		}
+	}
+	free_room(tar_dir, dir);
 }
 __device__ void my_pwd(int i) {
 	if(i == 0) {
@@ -171,7 +217,7 @@ __global__ void mykernel(uchar *input, uchar *output) {
 	//####kernel start####
 	u32 fp;
 	char s[] = "0000\0";
-	for(int i = 0; i < 500; i++) {
+	for(int i = 0; i < 100; i++) {
 		s[3] = '0'+i%10;
 		s[2] = '0'+i/10%10;
 		s[1] = '0'+i/100%10;
@@ -190,26 +236,58 @@ __global__ void mykernel(uchar *input, uchar *output) {
 			}
 		}
 	}
-	gsys(CD_P);
-	gsys(CD_P);
-	gsys(CD_P);
 	gsys(PWD);
-	gsys(LS_D);
-	for(int i = 310; i < 330; i++) {
+	gsys(LS_S);
+
+	gsys(PWD);
+	for(int i = 60; i < 90; i++) {
 		s[3] = '0'+i%10;
 		s[2] = '0'+i/10%10;
 		s[1] = '0'+i/100%10;
 		s[0] = '0'+i/1000;
 		fp = open(s, G_WRITE);
 		if(fp == ERROR) continue;
-		write(input+i-310, 1024, fp);
-		read(output+(i-310)*512, 1024, fp);
+		write(input+i-60, 1024, fp);
 	}
+	/*
+	fp = open("0077/haha.txt\0", G_WRITE);
+	write(input, 1024, fp);
+	gsys(RM_RF, "0077/haha.txt\0");
+	gsys(CD, "0077\0");
 	gsys(LS_D);
-	gsys(CD, "0301\0");
-	open("test~\0", G_WRITE);
+	fp = open("haha.txt\0", G_READ);
+	read(output, 1024, fp);
+	*/
+
 	gsys(CD_P);
+	gsys(CD_P);
+	gsys(PWD);
 	gsys(LS_D);
+	gsys(RM_RF, "0000\0");
+	gsys(LS_S);
+	gsys(RM, "0000\0");
+
+	for(int i = 0; i < 100; i++) {
+		s[3] = '0'+i%10;
+		s[2] = '0'+i/10%10;
+		s[1] = '0'+i/100%10;
+		s[0] = '0'+i/1000;
+		if(i%50 == 0) {
+			gsys(PWD);
+			gsys(LS_S);
+			gsys(MKDIR, s);
+			gsys(CD, s);
+		}
+		else {
+			if(i%2) gsys(MKDIR, s);
+			else {
+				fp = open(s, G_WRITE);
+				write(input, 1024, fp);
+			}
+		}
+	}
+	gsys(PWD);
+	gsys(LS_S);
 	//####kernel end####
 }
 int main() {
@@ -267,31 +345,25 @@ __device__ void init_volume() {
 	}
 }
 __device__ u32 open(char *file, uchar mode) {
-	int cur_dir = CUR_DIR;
-	for(int i = 2; i < MAX_CAPACITY; i++) {
-		int id = inode_id(cur_dir, i);
-		if(next_empty_child(cur_dir, i) == 0 && my_strcmp(name(id), file) == 0) {
-			if(isdir(id)) {
-				printf("%s is a directory\n", file);
-				return ERROR;
-			}
-			else {
-				next_empty(id, 0); //set fp to 0
-				return id;
-			}
-		}
+	int last_dir;
+	int i = find_by_name(file, CUR_DIR, &last_dir);
+	int id = inode_id(last_dir, i);
+	if(last_dir == ERROR) {
+		printf("Wrong path %s\n", file); //連路徑都打錯太扯了，就算是G_WRITE都不能給過
+		return ERROR;
 	}
-
-	if(mode == G_WRITE) { //create
-		int i = find_room();
-		if(i == -1) return ERROR;
-		isempty(i, 1); //set not empty
-		next_empty(i, 0); //set fp to 0
-		size(i, 0); //set size to 0
-		timestamp(i, TIME); //set timestamp
-		name(i, file); //set name
+	else if(id != ERROR) return id;
+	else if (mode == G_WRITE) { //create
+		int id = find_room(last_dir);
+		if(id == -1) return ERROR;
+		isdir(id, 0); //set not directory
+		isempty(id, 1); //set not empty
+		next_empty(id, 0); //set fp to 0
+		size(id, 0); //set size to 0
+		timestamp(id, TIME); //set timestamp
+		name(id, file); //set name
 		INC_TIME; //increase time
-		return i;
+		return id;
 	}
 	else return ERROR;
 }
@@ -323,13 +395,13 @@ __device__ void gsys(uchar arg, char *file) {
 		int a[MAX_CAPACITY];
 		int n = 0;
 		int cur_dir = CUR_DIR;
-		for(int i = 2; i < MAX_CAPACITY; i++) {
+		for(int i = 2; i < MAX_CAPACITY; i++) { //從2開始，避開 ../
 			if(next_empty_child(cur_dir, i) == 0)
 				a[n++] = inode_id(cur_dir, i);
 		}
 		for(int i = 0; i < n; i++) {
 			for(int j = i+1; j < n; j++) {
-				if(isdir(a[j]) || size(a[i]) >size(a[j])) {
+				if(isdir(a[j]) || size(a[i]) > size(a[j])) {
 					int tmp = a[i];
 					a[i] = a[j];
 					a[j] = tmp;
@@ -370,49 +442,53 @@ __device__ void gsys(uchar arg, char *file) {
 		printf("\n");
 	}
 	else if(arg == CD) {
-		if(my_strcmp((uchar*)file, "..\0") == 0) {
-			gsys(CD_P);
-			return;
-		}
-		int cur_dir = CUR_DIR;
-		for(int i = 2; i < MAX_CAPACITY; i++) {
-			int id = inode_id(cur_dir, i);
-			if(next_empty_child(cur_dir, i) == 0 && my_strcmp(name(id), file) == 0) {
-				if(isdir(id)) SET_CUR_DIR(id);
-				else printf("%s is a file\n", file);
-				return;
-			}
-		}
-		printf("No such directory %s\n", file);
+		int i, last_dir;
+		if(file[0] == '/') i = find_by_name(file, 0, &last_dir); //abs
+		else i = find_by_name(file, CUR_DIR, &last_dir);
+		int id = inode_id(last_dir, i); //if i = ERROR, id = ERROR, too!
+		if(id == ERROR) printf("No such directory %s\n", file);
+		else if(!isdir(id)) printf("%s is s file\n", file);
+		else SET_CUR_DIR(id);
 	}
 	else if(arg == CD_P) {
 		int cur_dir = CUR_DIR;
 		if(cur_dir == 0) printf("alread at root\n");
 		else SET_CUR_DIR(inode_id(cur_dir, 1));
 	}
-	else if(arg == RM || arg == RM_RF) {
-		int cur_dir = CUR_DIR;
-		for(int i = 2; i < MAX_CAPACITY; i++) {
-			int id = inode_id(cur_dir, i);
-			if(next_empty_child(cur_dir, i) == 0 && my_strcmp(name(id), file) == 0) {
-				if(isdir(id) && arg == RM) printf("Can't rm %s, it's a directory\n", file);
-				else free_room(i);
-				return;
-			}
-		}
-		printf("No such file or directory %s\n", file);
+	else if(arg == RM) {
+		int last_dir;
+		int i = find_by_name(file, CUR_DIR, &last_dir);
+		int id = inode_id(last_dir, i);
+		if(id == ERROR) printf("No such file %s\n", file);
+		else if(isdir(id)) printf("%s is s directory, can't remove by RM\n", file);
+		else free_room(i, last_dir); //free_room 吃的是i不是id!!
+	}
+	else if(arg == RM_RF) {
+		int last_dir;
+		int i = find_by_name(file, CUR_DIR, &last_dir);
+		int id = inode_id(last_dir, i);
+		if(id == ERROR) printf("No such file %s(though rm-rf is silence in real Linux XD.)\n", file);
+		else if(!isdir(id)) printf("%s is a file, can't remove it by RM_RF(though we can in real Linux XD)\n", file);
+		else free_dir(i, last_dir); //free_dir 吃的是i不是id!!
 	}
 	else if(arg == MKDIR) {
-		int tar = find_room();
-		name(tar, file);
-		timestamp(tar, TIME);
-		INC_TIME;
-		isdir(tar, 1);
-		isempty(tar, 1);
-		next_empty_child(tar, 0, 2);  //0 is superblock, 1 is ../ , starts from 2
-		inode_id(tar, 1, CUR_DIR);
-		for(int i = 2; i < MAX_CAPACITY; i++) {
-			next_empty_child(tar, i, i+1); //point to next
+		int last_dir;
+		int i = find_by_name(file, CUR_DIR, &last_dir);
+		int id = inode_id(last_dir, i);
+		if(last_dir == ERROR) printf("Wrong path %s\n", file);
+		else if(id != ERROR) printf("%s exists!\n", file);
+		else {
+			id = find_room(last_dir);
+			name(id, file);
+			timestamp(id, TIME);
+			INC_TIME;
+			isdir(id, 1);
+			isempty(id, 1);
+			next_empty_child(id, 0, 2);  //0 is superblock, 1 is ../ , starts from 2
+			inode_id(id, 1, last_dir);
+			for(int i = 2; i < MAX_CAPACITY; i++) {
+				next_empty_child(id, i, i+1); //point to next
+			}
 		}
 	}
 }

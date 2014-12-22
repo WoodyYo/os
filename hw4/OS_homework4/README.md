@@ -1,5 +1,5 @@
 #Compiling Issue
-直接 $ make main即可
+直接 $ make即可
 
 執行程式則 $./fs
 
