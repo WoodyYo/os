@@ -1,7 +1,9 @@
-test*
-snapshot.bin
-*.tar.gz
-a.out
-*.pyc
-log*
-*.txt
+*.o
+Module*
+*.mod.*
+test
+.*.swp
+.*.cmd
+.tmp_versions/
+*.ko
+*.order
